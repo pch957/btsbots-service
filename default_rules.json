@@ -1,0 +1,66 @@
+{
+    "description": "BTSBots Account and Asset Pricing Risk Control Strategy",
+    "updated_at": "2026-09-01 21:25:00",
+    "fee_limit": 10,
+    "public_keys": {
+        "439fe4d668aeee57cdf904f379fde0618c482c0ea09xxxxxx6": "pc-web-market",
+        "c266a5528a64d93184e1f59ab65ee325bfe3fxxxxxxxe9300a": "pc-web-wallet",
+        "afd3094191a27140b4a71ef15e319334xxxxxc933ddc2c1d8f": "phone-wallet",
+        "81c19d9f3de7d23df140fccb1xxxxxx0f14456ca923ce7e5ee": "phone-market",
+        "2c122dd94e2ff941d0xxxxxx9405dc7522d244903305981992": "phone-web-wallet"
+    },
+    "oauth_allowed_devices": [
+        "phone-wallet",
+        "pc-web-wallet"
+    ],
+    "trading_risk": {
+        "authorized_devices": [
+            "pc-web-market"
+        ],
+        "volatility_limit_1h": 0.97,
+        "volatility_limit_1d": 0.95,
+        "volatility_limit_1w": 0.9,
+        "market_whitelist": [
+            "CNY/USD",
+            "CNY/BTS",
+            "BTS/USD"
+        ]
+    },
+    "unlimited_payments": {
+        "authorized_devices": [
+            "pc-web-wallet",
+            "phone-wallet",
+            "phone-web-wallet"
+        ],
+        "recipient_whitelist": {
+            "angel": "1.2.1000"
+        }
+    },
+    "micro_payments": {
+        "base_limits": {
+            "CNY": 50,
+            "USD": 10,
+            "BTS": 1000
+        },
+        "device_rules": {
+            "phone-web-wallet": {
+                "single_multiplier": 2,
+                "day_max_multiplier": 10,
+                "week_max_multiplier": 50,
+                "pin": 222222
+            },
+            "pc-web-wallet": {
+                "single_multiplier": 2,
+                "day_max_multiplier": 10,
+                "week_max_multiplier": 50,
+                "pin": 222222
+            },
+            "phone-wallet": {
+                "single_multiplier": 20,
+                "day_max_multiplier": 100,
+                "week_max_multiplier": 500,
+                "pin": 222222
+            }
+        }
+    }
+}

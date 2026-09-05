@@ -1,0 +1,22 @@
+node_modules/
+dist/
+dist-ssr/
+*.local
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.log
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# BTSBots Local Data & Credentials
+credentials.txt
+*_credentials.txt
+security_rules.json
+bots.sqlite
+biz.sqlite
+.env
+.gemini*
