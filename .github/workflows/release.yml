@@ -24,7 +24,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -41,6 +41,14 @@ jobs:
 
       - name: Install Frontend Dependencies
         run: npm install
+
+      - name: Ensure Icons exist
+        run: |
+          mkdir -p src-tauri/icons
+          if [ ! -f "src-tauri/icons/icon.png" ]; then
+            npx @tauri-apps/cli icon public/vite.svg || true
+          fi
+        shell: bash
 
       - name: Build Desktop Artifacts (Tauri Action)
         uses: tauri-apps/tauri-action@v0

@@ -3,7 +3,7 @@ import { i18n } from './i18n/locales';
 import { KeystoreManager } from './core/keystore';
 import { signBotsEngine } from './core/signBots';
 import { copyToClipboard } from './core/utils';
-import { SecurityRules, RecipientRule } from './types/rules';
+import { SecurityRules } from './types/rules';
 
 export function App() {
   const [lang, setLang] = useState<'zh' | 'en' | 'ru'>('zh');
@@ -67,6 +67,8 @@ export function App() {
       setCurrentAccount(creds.account);
       setIsUnlocked(true);
       await signBotsEngine.loginWithKeys(creds.account, creds.keys);
+      // 解锁成功后立即清空口令输入框
+      setUnlockPassword('');
       alert(`🎉 [${creds.account}] 解锁成功！`);
       setActiveTab('gateway');
     } catch (e: any) {
@@ -108,6 +110,12 @@ export function App() {
       setCurrentAccount(account);
       setIsUnlocked(true);
       await signBotsEngine.loginWithKeys(account, keys);
+
+      // 清空敏感输入
+      setImportPassword('');
+      setImportFileContent('');
+      setImportFileName('');
+
       alert(`🎉 凭据导入成功！已加密保存。当前账号: ${account}`);
       setActiveTab('gateway');
     } catch (err: any) {
@@ -127,6 +135,12 @@ export function App() {
       setCurrentAccount(res.username);
       setIsUnlocked(true);
       await signBotsEngine.loginWithKeys(res.username, res.keys);
+
+      // 清空输入
+      setRegPassword('');
+      setRegInvite('');
+      setRegUsername('');
+
       alert(`✨ 账号 [${res.username}] 注册申请已提交！私钥已加密至金库。`);
       setActiveTab('gateway');
     } catch (e: any) {
@@ -603,7 +617,7 @@ export function App() {
                 </div>
               )}
 
-              {/* 子面板 2: 自由大额转账 (支持在界面内联直接编辑与设定 Memo) */}
+              {/* 子面板 2: 自由大额转账 */}
               {rulesSubTab === 'unlimited' && (
                 <div className="space-y-4 text-xs">
                   <div className="bg-[#151d30]/70 border border-white/5 p-4 rounded-xl space-y-3 shadow-xl">
@@ -731,7 +745,7 @@ export function App() {
                                   unlimited_payments: {
                                     ...rules.unlimited_payments,
                                     recipient_whitelist: {
-                                      ...rules.unlimited_payments.recipient_whitelist,
+                                      ...rules.unlimited_payments,
                                       [acc]: { id: idStr, required_memo: newMemo },
                                     },
                                   },
