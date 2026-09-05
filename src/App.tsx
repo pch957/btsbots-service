@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { i18n } from './i18n/locales';
 import { KeystoreManager } from './core/keystore';
 import { signBotsEngine } from './core/signBots';
+import { copyToClipboard } from './core/utils';
 import { SecurityRules, RecipientRule } from './types/rules';
 
 export function App() {
@@ -162,6 +163,16 @@ export function App() {
     }
   };
 
+  const handleCopyOtp = async () => {
+    if (!otpCode || otpCode.includes('-') || otpCode === '........') return;
+    const ok = await copyToClipboard(otpCode);
+    if (ok) {
+      alert(`✓ 已复制 8 位 OTP 验证码: ${otpCode}`);
+    } else {
+      alert(`复制失败，请手动记录: ${otpCode}`);
+    }
+  };
+
   const saveRulesToLocal = async () => {
     if (!rules) return;
     await signBotsEngine.saveRules(rules);
@@ -318,7 +329,7 @@ export function App() {
                 <div className="bg-[#151d30]/70 border border-white/5 rounded-2xl p-5 space-y-3 shadow-xl">
                   <h4 className="font-bold text-xs">{t.vault_import_title}</h4>
                   
-                  {/* 高清晰度的自定义文件选择按钮 */}
+                  {/* 清晰的文件选择器 */}
                   <div>
                     <input
                       type="file"
@@ -449,12 +460,8 @@ export function App() {
                 <div className="w-full flex items-center justify-between bg-slate-900 border border-slate-700/80 rounded-xl px-5 py-3">
                   <div className="font-mono text-2xl font-bold tracking-[0.2em] text-amber-400">{otpCode}</div>
                   <button
-                    onClick={() => {
-                      if (!otpCode || otpCode.includes('-')) return;
-                      navigator.clipboard.writeText(otpCode);
-                      alert(`已复制: ${otpCode}`);
-                    }}
-                    className="text-xs px-2.5 py-1.5 bg-slate-800 rounded-lg border border-slate-700 hover:bg-slate-700 text-slate-200"
+                    onClick={handleCopyOtp}
+                    className="text-xs px-2.5 py-1.5 bg-slate-800 rounded-lg border border-slate-700 hover:bg-slate-700 text-slate-200 transition"
                   >
                     复制
                   </button>
@@ -507,7 +514,7 @@ export function App() {
                 ))}
               </div>
 
-              {/* 子面板 1: 全局与设备管理 (合并手续费熔断) */}
+              {/* 子面板 1: 全局与设备管理 (合并手续费上限) */}
               {rulesSubTab === 'devices' && (
                 <div className="space-y-4">
                   {/* 手续费上限合并至此 */}
@@ -596,7 +603,7 @@ export function App() {
                 </div>
               )}
 
-              {/* 子面板 2: 自由大额转账 (完整内联支持 Memo 编辑) */}
+              {/* 子面板 2: 自由大额转账 (支持在界面内联直接编辑与设定 Memo) */}
               {rulesSubTab === 'unlimited' && (
                 <div className="space-y-4 text-xs">
                   <div className="bg-[#151d30]/70 border border-white/5 p-4 rounded-xl space-y-3 shadow-xl">
