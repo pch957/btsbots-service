@@ -67,7 +67,6 @@ export function App() {
       setCurrentAccount(creds.account);
       setIsUnlocked(true);
       await signBotsEngine.loginWithKeys(creds.account, creds.keys);
-      // 解锁成功后立即清空口令输入框
       setUnlockPassword('');
       alert(`🎉 [${creds.account}] 解锁成功！`);
       setActiveTab('gateway');
@@ -111,7 +110,6 @@ export function App() {
       setIsUnlocked(true);
       await signBotsEngine.loginWithKeys(account, keys);
 
-      // 清空敏感输入
       setImportPassword('');
       setImportFileContent('');
       setImportFileName('');
@@ -136,7 +134,6 @@ export function App() {
       setIsUnlocked(true);
       await signBotsEngine.loginWithKeys(res.username, res.keys);
 
-      // 清空输入
       setRegPassword('');
       setRegInvite('');
       setRegUsername('');
@@ -343,7 +340,6 @@ export function App() {
                 <div className="bg-[#151d30]/70 border border-white/5 rounded-2xl p-5 space-y-3 shadow-xl">
                   <h4 className="font-bold text-xs">{t.vault_import_title}</h4>
                   
-                  {/* 清晰的文件选择器 */}
                   <div>
                     <input
                       type="file"
@@ -531,7 +527,6 @@ export function App() {
               {/* 子面板 1: 全局与设备管理 (合并手续费上限) */}
               {rulesSubTab === 'devices' && (
                 <div className="space-y-4">
-                  {/* 手续费上限合并至此 */}
                   <div className="bg-[#151d30]/70 border border-blue-500/30 p-3.5 rounded-xl flex items-center justify-between shadow-lg">
                     <div>
                       <div className="text-xs font-bold text-slate-200">{t.global_fee_title}</div>
@@ -724,7 +719,7 @@ export function App() {
                                   unlimited_payments: {
                                     ...rules.unlimited_payments,
                                     recipient_whitelist: {
-                                      ...rules.unlimited_payments.recipient_whitelist,
+                                      ...rules.unlimited_payments,
                                       [acc]: { id: newId, required_memo: memoStr },
                                     },
                                   },

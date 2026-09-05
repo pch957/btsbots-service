@@ -1,4 +1,4 @@
-import { PrivateKey, PublicKey, Signature } from 'bitsharesjs';
+import { PrivateKey, Signature } from 'bitsharesjs';
 
 export class KeyManager {
   private keyStore: Map<string, PrivateKey> = new Map(); // pubKeyStr -> PrivateKey

@@ -1,5 +1,4 @@
-import { bufferToHex, hexToBuffer } from './utils';
-import crypto from 'crypto';
+import { Buffer } from 'buffer';
 
 const KEYSTORE_STORAGE_KEY = 'btsbots_keystore_v1';
 const SAVED_ACCOUNT_KEY = 'btsbots_saved_account';
@@ -21,25 +20,48 @@ export class KeystoreManager {
   }
 
   static async saveCredentials(password: string, accountName: string, keys: string[]): Promise<void> {
-    const salt = crypto.randomBytes(16);
-    const iv = crypto.randomBytes(12);
+    const enc = new TextEncoder();
+    const salt = window.crypto.getRandomValues(new Uint8Array(16));
+    const iv = window.crypto.getRandomValues(new Uint8Array(12));
 
-    // 使用标准 PBKDF2 派生 256 位密钥
-    const key = crypto.pbkdf2Sync(password, salt, 100000, 32, 'sha256');
+    const passwordKey = await window.crypto.subtle.importKey(
+      'raw',
+      enc.encode(password),
+      { name: 'PBKDF2' },
+      false,
+      ['deriveKey']
+    );
 
-    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    const aesKey = await window.crypto.subtle.deriveKey(
+      {
+        name: 'PBKDF2',
+        salt,
+        iterations: 100000,
+        hash: 'SHA-256',
+      },
+      passwordKey,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt']
+    );
+
     const dataObj = { account: accountName, keys };
     const plainText = JSON.stringify(dataObj);
 
-    let encrypted = cipher.update(plainText, 'utf8', 'hex');
-    encrypted += cipher.final('hex');
-    const tag = cipher.getAuthTag();
+    const cipherBuffer = await window.crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      aesKey,
+      enc.encode(plainText)
+    );
+
+    const cipherArray = new Uint8Array(cipherBuffer);
+    const cipherHex = Buffer.from(cipherArray).toString('hex');
 
     const payload: EncryptedPayload = {
-      saltHex: salt.toString('hex'),
-      ivHex: iv.toString('hex'),
-      tagHex: tag.toString('hex'),
-      cipherHex: encrypted,
+      saltHex: Buffer.from(salt).toString('hex'),
+      ivHex: Buffer.from(iv).toString('hex'),
+      tagHex: '',
+      cipherHex,
     };
 
     localStorage.setItem(KEYSTORE_STORAGE_KEY, JSON.stringify(payload));
@@ -54,19 +76,40 @@ export class KeystoreManager {
 
     try {
       const payload: EncryptedPayload = JSON.parse(rawStr);
-      const salt = Buffer.from(payload.saltHex, 'hex');
-      const iv = Buffer.from(payload.ivHex, 'hex');
-      const tag = Buffer.from(payload.tagHex, 'hex');
+      const salt = Uint8Array.from(Buffer.from(payload.saltHex, 'hex'));
+      const iv = Uint8Array.from(Buffer.from(payload.ivHex, 'hex'));
+      const cipherBytes = Uint8Array.from(Buffer.from(payload.cipherHex, 'hex'));
 
-      const key = crypto.pbkdf2Sync(password, salt, 100000, 32, 'sha256');
+      const enc = new TextEncoder();
+      const passwordKey = await window.crypto.subtle.importKey(
+        'raw',
+        enc.encode(password),
+        { name: 'PBKDF2' },
+        false,
+        ['deriveKey']
+      );
 
-      const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-      decipher.setAuthTag(tag);
+      const aesKey = await window.crypto.subtle.deriveKey(
+        {
+          name: 'PBKDF2',
+          salt,
+          iterations: 100000,
+          hash: 'SHA-256',
+        },
+        passwordKey,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['decrypt']
+      );
 
-      let decrypted = decipher.update(payload.cipherHex, 'hex', 'utf8');
-      decrypted += decipher.final('utf8');
+      const decryptedBuffer = await window.crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv },
+        aesKey,
+        cipherBytes
+      );
 
-      return JSON.parse(decrypted);
+      const dec = new TextDecoder();
+      return JSON.parse(dec.decode(decryptedBuffer));
     } catch {
       throw new Error('解锁口令错误或金库数据已损坏');
     }

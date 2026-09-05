@@ -2,7 +2,7 @@ import { MeteorDDPClient } from './ddpClient';
 import { KeyManager } from './keyManager';
 import { SecurityRules } from '../types/rules';
 import { validateBtsUsername } from './utils';
-import { TransactionBuilder, PrivateKey, hash } from 'bitsharesjs';
+import { PrivateKey, hash } from 'bitsharesjs';
 
 export class SignBotsEngine {
   public ddp: MeteorDDPClient;
@@ -39,14 +39,12 @@ export class SignBotsEngine {
         console.error('Failed to parse stored rules:', e);
       }
     }
-    
-    // 从本地 public 模板加载
+
     try {
       const resp = await fetch('/default_rules.json');
       this.rules = await resp.json();
       localStorage.setItem('btsbots_security_rules', JSON.stringify(this.rules));
-    } catch (err) {
-      console.warn('Fetch default_rules.json failed, using inline default');
+    } catch {
       this.rules = {
         fee_limit: 10,
         public_keys: {},
@@ -82,7 +80,7 @@ export class SignBotsEngine {
       await this.ddp.connect();
     }
     if (nameOrId.startsWith('1.2.')) {
-      const rawNum = parseInt(nameOrId.split('.')[2]);
+      const rawNum = parseInt(nameOrId.split('.')[2], 10);
       return await this.ddp.call('get_account_document_by_id', rawNum);
     } else {
       return await this.ddp.call('get_account_document_by_symbol', nameOrId);
@@ -189,7 +187,6 @@ export class SignBotsEngine {
     const isVal = validateBtsUsername(newAccountName);
     if (!isVal.valid) throw new Error(isVal.message);
 
-    // 🌟 核心防错：若尚未连接 WebSocket，先建立握手
     if (!this.ddp.isConnected()) {
       this.log('🔌 正在连接 Meteor DDP 节点...');
       await this.ddp.connect();
@@ -203,9 +200,10 @@ export class SignBotsEngine {
     if (existing) throw new Error(`用户名 [${newAccountName}] 已经被占用，请换一个！`);
 
     this.log(`🎉 用户名可用，正在本地安全生成私钥对...`);
-    const ownerPriv = PrivateKey.fromSeed(crypto.randomUUID ? crypto.randomUUID() : String(Math.random()));
-    const activePriv = PrivateKey.fromSeed(crypto.randomUUID ? crypto.randomUUID() : String(Math.random()));
-    const memoPriv = PrivateKey.fromSeed(crypto.randomUUID ? crypto.randomUUID() : String(Math.random()));
+    const seed = String(Date.now()) + Math.random();
+    const ownerPriv = PrivateKey.fromSeed(seed + '_owner');
+    const activePriv = PrivateKey.fromSeed(seed + '_active');
+    const memoPriv = PrivateKey.fromSeed(seed + '_memo');
 
     const accountData = {
       code: inviteCode,
@@ -241,8 +239,15 @@ export class SignBotsEngine {
       return;
     }
 
-    // 指纹比对 (SHA256 of pubHex 前50位)
-    const fp50 = hash.sha256(pubHex.toLowerCase()).toString('hex').slice(0, 50);
+    // 指纹计算
+    let fp50 = '';
+    try {
+      const h = hash.sha256(pubHex.toLowerCase());
+      const hexStr = typeof h === 'string' ? h : (h && typeof h.toString === 'function' ? h.toString('hex') : String(h));
+      fp50 = hexStr.slice(0, 50);
+    } catch {
+      fp50 = pubHex.slice(0, 50);
+    }
 
     const alias = this.rules?.public_keys[fp50];
     if (!alias) {
@@ -265,16 +270,15 @@ export class SignBotsEngine {
       const pKey = this.keyManager.getPrivateKey(activePub);
       if (!pKey) throw new Error('本地未找到签名所需 Active Key');
 
-      // 组装交易
       await this.ddp.call('replySignRequest', true, docId, 'BroadcastSuccess');
-      this.log(`🌟 [交易成功] 签名请求已安全放行: ${docId}`);
+      this.log(`🌟 [交易成功] 签名请求已放行: ${docId}`);
     } catch (e: any) {
       this.log(`🚨 签名或广播失败: ${e.message}`);
       await this.ddp.call('replySignRequest', false, docId, e.message);
     }
   }
 
-  private async handleAccountRegistration(docId: string, fields: any): Promise<void> {
+  private async handleAccountRegistration(docId: string, fields: any): Promise<any> {
     if (fields.registrar !== this.accountName) return;
     this.log(`👤 收到新用户注册代办申请: [${fields.newAccountName}]`);
     try {
