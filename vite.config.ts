@@ -19,6 +19,9 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
     host: '127.0.0.1',
+    allowedHosts: [
+      'service.btsbots.com',   // 🔴 允许你当前使用的自定义开发域名
+    ]
   },
   resolve: {
     alias: {

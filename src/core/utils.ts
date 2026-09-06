@@ -1,3 +1,7 @@
+import { PublicKey } from 'bitsharesjs';
+import bs58 from 'bs58';
+import { Buffer } from 'buffer';
+
 /**
  * 校验 BitShares 用户名规范 (8 - 30 位小写英文开头规范)
  */
@@ -35,18 +39,48 @@ export function validateBtsUsername(username: string): { valid: boolean; message
   return { valid: true, message: '校验通过' };
 }
 
-export function bufferToHex(buffer: ArrayBuffer | Uint8Array): string {
+export function bufferToHex(buffer: ArrayBuffer | Uint8Array | any): string {
+  if (!buffer) return '';
+  if (typeof buffer === 'string') return buffer.replace(/^0x/, '');
+  if (Buffer.isBuffer(buffer)) return buffer.toString('hex');
   const bytes = new Uint8Array(buffer);
   return Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
 }
 
-export function hexToBuffer(hexString: string): Uint8Array {
-  const cleanHex = hexString.replace(/^0x/, '');
-  const bytes = new Uint8Array(cleanHex.length / 2);
-  for (let i = 0; i < cleanHex.length; i += 2) {
-    bytes[i / 2] = parseInt(cleanHex.substring(i, i + 2), 16);
+/**
+ * 🌟 泛型超强容错 hexToBuffer（彻底解决 hexString.replace is not a function 异常）
+ */
+export function hexToBuffer(hexInput: any): Uint8Array {
+  if (!hexInput) return new Uint8Array(0);
+  if (hexInput instanceof Uint8Array) return hexInput;
+  if (Buffer.isBuffer(hexInput)) return new Uint8Array(hexInput);
+  if (ArrayBuffer.isView(hexInput)) {
+    return new Uint8Array(hexInput.buffer, hexInput.byteOffset, hexInput.byteLength);
+  }
+  if (Array.isArray(hexInput)) return new Uint8Array(hexInput);
+
+  let hexString = '';
+  if (typeof hexInput === 'string') {
+    hexString = hexInput;
+  } else if (hexInput && typeof hexInput.toString === 'function') {
+    hexString = hexInput.toString('hex');
+    if (hexString === '[object Object]') {
+      hexString = String(hexInput);
+    }
+  } else {
+    hexString = String(hexInput);
+  }
+
+  const cleanHex = hexString.replace(/^0x/, '').trim();
+  if (cleanHex.length === 0) return new Uint8Array(0);
+
+  const len = Math.floor(cleanHex.length / 2);
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len * 2; i += 2) {
+    const byteVal = parseInt(cleanHex.substring(i, i + 2), 16);
+    bytes[i / 2] = isNaN(byteVal) ? 0 : byteVal;
   }
   return bytes;
 }
@@ -56,17 +90,13 @@ export function hexToBuffer(hexString: string): Uint8Array {
  */
 export async function copyToClipboard(text: string): Promise<boolean> {
   if (!text) return false;
-  // 1. 尝试现代 Clipboard API
   if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
     try {
       await navigator.clipboard.writeText(text);
       return true;
-    } catch {
-      // 若受限则降级
-    }
+    } catch {}
   }
 
-  // 2. 降级方案：创建不可见 textarea + execCommand
   try {
     const textArea = document.createElement('textarea');
     textArea.value = text;

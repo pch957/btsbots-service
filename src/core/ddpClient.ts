@@ -21,6 +21,7 @@ export class MeteorDDPClient extends EventEmitter {
   public loginToken: string | null = null;
   private reconnectTimer: any = null;
   private isExplicitClose = false;
+  private isConnecting = false;
 
   constructor(url = 'wss://ws.btsbots.com/websocket') {
     super();
@@ -33,17 +34,39 @@ export class MeteorDDPClient extends EventEmitter {
 
   public async connect(): Promise<void> {
     if (this.isConnected()) return;
+    if (this.isConnecting) return;
+
+    this.isConnecting = true;
     this.isExplicitClose = false;
+
+    // 清理旧 WebSocket
+    if (this.ws) {
+      try {
+        this.ws.onopen = null;
+        this.ws.onmessage = null;
+        this.ws.onclose = null;
+        this.ws.onerror = null;
+        this.ws.close();
+      } catch {}
+      this.ws = null;
+    }
+
     return new Promise((resolve, reject) => {
       try {
         this.ws = new WebSocket(this.url);
 
         this.ws.onopen = () => {
+          this.isConnecting = false;
           this.ws?.send(JSON.stringify({ msg: 'connect', version: '1', support: ['1'] }));
         };
 
         this.ws.onmessage = (event) => {
-          const data = JSON.parse(event.data);
+          let data: any;
+          try {
+            data = JSON.parse(event.data);
+          } catch {
+            return;
+          }
           const msgType = data.msg;
 
           if (msgType === 'connected') {
@@ -94,6 +117,7 @@ export class MeteorDDPClient extends EventEmitter {
         };
 
         this.ws.onclose = () => {
+          this.isConnecting = false;
           this.emit('disconnected');
           if (!this.isExplicitClose) {
             this.scheduleReconnect();
@@ -101,10 +125,12 @@ export class MeteorDDPClient extends EventEmitter {
         };
 
         this.ws.onerror = (err) => {
+          this.isConnecting = false;
           this.emit('error', err);
           reject(err);
         };
       } catch (e) {
+        this.isConnecting = false;
         reject(e);
       }
     });
@@ -165,11 +191,20 @@ export class MeteorDDPClient extends EventEmitter {
 
   public close(): void {
     this.isExplicitClose = true;
+    this.isConnecting = false;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-    this.ws?.close();
-    this.ws = null;
+    if (this.ws) {
+      try {
+        this.ws.onopen = null;
+        this.ws.onmessage = null;
+        this.ws.onclose = null;
+        this.ws.onerror = null;
+        this.ws.close();
+      } catch {}
+      this.ws = null;
+    }
   }
 }
