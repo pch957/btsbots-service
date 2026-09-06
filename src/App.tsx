@@ -5,6 +5,9 @@ import { signBotsEngine } from './core/signBots';
 import { copyToClipboard } from './core/utils';
 import { SecurityRules } from './types/rules';
 
+const SCREEN_PIN_KEY = 'btsbots_screen_pin';
+const AUTO_LOCK_TIMEOUT_MS = 5 * 60 * 1000; // 5 分钟无操作自动锁屏
+
 export function App() {
   const [lang, setLang] = useState<'zh' | 'en' | 'ru'>('zh');
   const [activeTab, setActiveTab] = useState<'auth' | 'gateway' | 'otp' | 'rules' | 'logs'>('auth');
@@ -16,7 +19,15 @@ export function App() {
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [isGwRunning, setIsGwRunning] = useState(false);
 
-  // Forms
+  // 锁屏与 PIN 码状态
+  const [isScreenLocked, setIsScreenLocked] = useState(false);
+  const [hasPinSet, setHasPinSet] = useState(false);
+  const [pinInput, setPinInput] = useState('');
+  const [showSetPinModal, setShowSetPinModal] = useState(false);
+  const [newPinInput, setNewPinInput] = useState('');
+  const [confirmPinInput, setConfirmPinInput] = useState('');
+
+  // 账号表单
   const [unlockPassword, setUnlockPassword] = useState('');
   const [importFileContent, setImportFileContent] = useState('');
   const [importFileName, setImportFileName] = useState('');
@@ -34,10 +45,9 @@ export function App() {
   // Rules State
   const [rules, setRules] = useState<SecurityRules | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
-
-  // Rules Sub Forms Temp State
   const [newMarket, setNewMarket] = useState('');
 
+  const lastActivityRef = useRef<number>(Date.now());
   const t = i18n[lang];
 
   useEffect(() => {
@@ -50,8 +60,32 @@ export function App() {
     setHasKeystore(ksExists);
     setSavedAccount(saved);
 
+    const pin = localStorage.getItem(SCREEN_PIN_KEY);
+    setHasPinSet(!!pin);
+
     signBotsEngine.loadRules().then((r) => setRules(r));
-  }, []);
+
+    // 5 分钟闲置检测
+    const updateActivity = () => {
+      lastActivityRef.current = Date.now();
+    };
+
+    const activityEvents = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'];
+    activityEvents.forEach((ev) => window.addEventListener(ev, updateActivity, { passive: true }));
+
+    const timer = setInterval(() => {
+      if (isUnlocked && !isScreenLocked && localStorage.getItem(SCREEN_PIN_KEY)) {
+        if (Date.now() - lastActivityRef.current >= AUTO_LOCK_TIMEOUT_MS) {
+          setIsScreenLocked(true);
+        }
+      }
+    }, 5000);
+
+    return () => {
+      activityEvents.forEach((ev) => window.removeEventListener(ev, updateActivity));
+      clearInterval(timer);
+    };
+  }, [isUnlocked, isScreenLocked]);
 
   useEffect(() => {
     if (otpTimer && otpTimer > 0) {
@@ -59,6 +93,67 @@ export function App() {
       return () => clearTimeout(timer);
     }
   }, [otpTimer]);
+
+  // PIN 码与锁屏逻辑
+  const handleLockScreenBtn = () => {
+    if (!localStorage.getItem(SCREEN_PIN_KEY)) {
+      setShowSetPinModal(true);
+    } else {
+      setIsScreenLocked(true);
+      setPinInput('');
+    }
+  };
+
+  const handleSavePin = () => {
+    if (!newPinInput || newPinInput.length < 4) {
+      return alert('PIN 码不能少于 4 位数字！');
+    }
+    if (newPinInput !== confirmPinInput) {
+      return alert('两次输入的 PIN 码不一致！');
+    }
+    localStorage.setItem(SCREEN_PIN_KEY, newPinInput);
+    setHasPinSet(true);
+    setShowSetPinModal(false);
+    setNewPinInput('');
+    setConfirmPinInput('');
+    alert('✓ 安全 PIN 码设置成功！5 分钟无操作将自动锁屏。');
+    setIsScreenLocked(true);
+  };
+
+  const handleUnlockPin = () => {
+    const savedPin = localStorage.getItem(SCREEN_PIN_KEY);
+    if (pinInput === savedPin) {
+      setIsScreenLocked(false);
+      setPinInput('');
+      lastActivityRef.current = Date.now();
+    } else {
+      alert('PIN 码错误，请重新输入！');
+      setPinInput('');
+    }
+  };
+
+  // 忘记 PIN 码逻辑
+  const handleForgotPin = () => {
+    if (!confirm('忘记 PIN 码将清除本地 PIN，立即断开与服务器的会话并擦除已解密密钥。确定重置吗？')) {
+      return;
+    }
+    localStorage.removeItem(SCREEN_PIN_KEY);
+    setHasPinSet(false);
+    setIsScreenLocked(false);
+    setPinInput('');
+
+    // 安全熔断退出
+    if (isGwRunning) {
+      signBotsEngine.stopGateway();
+      setIsGwRunning(false);
+    }
+    signBotsEngine.keyManager.clear();
+    signBotsEngine.ddp.close();
+    setIsUnlocked(false);
+    setCurrentAccount(null);
+    setActiveTab('auth');
+    alert('已重置 PIN 码并断开会话，请使用主密码重新解锁。');
+  };
 
   const handleUnlock = async () => {
     if (!unlockPassword) return alert('请输入解锁口令！');
@@ -68,6 +163,7 @@ export function App() {
       setIsUnlocked(true);
       await signBotsEngine.loginWithKeys(creds.account, creds.keys);
       setUnlockPassword('');
+      lastActivityRef.current = Date.now();
       alert(`🎉 [${creds.account}] 解锁成功！`);
       setActiveTab('gateway');
     } catch (e: any) {
@@ -113,6 +209,7 @@ export function App() {
       setImportPassword('');
       setImportFileContent('');
       setImportFileName('');
+      lastActivityRef.current = Date.now();
 
       alert(`🎉 凭据导入成功！已加密保存。当前账号: ${account}`);
       setActiveTab('gateway');
@@ -137,6 +234,7 @@ export function App() {
       setRegPassword('');
       setRegInvite('');
       setRegUsername('');
+      lastActivityRef.current = Date.now();
 
       alert(`✨ 账号 [${res.username}] 注册申请已提交！私钥已加密至金库。`);
       setActiveTab('gateway');
@@ -206,7 +304,94 @@ export function App() {
   };
 
   return (
-    <div className="flex flex-col h-screen select-none bg-[#0b0f19] text-slate-100">
+    <div className="flex flex-col h-screen select-none bg-[#0b0f19] text-slate-100 relative">
+      {/* 全屏锁屏遮罩 */}
+      {isScreenLocked && (
+        <div className="absolute inset-0 z-50 bg-[#0b0f19]/95 backdrop-blur-xl flex flex-col items-center justify-center p-6 space-y-6">
+          <div className="w-16 h-16 rounded-2xl bg-blue-600/10 border border-blue-500/20 text-blue-400 flex items-center justify-center text-3xl shadow-xl shadow-blue-500/10">
+            🔒
+          </div>
+          <div className="text-center space-y-1">
+            <h2 className="text-xl font-bold">屏幕已锁定</h2>
+            <p className="text-xs text-slate-400">已保护当前会话，请输入安全 PIN 码解锁</p>
+          </div>
+
+          <div className="w-full max-w-xs space-y-4">
+            <input
+              type="password"
+              maxLength={8}
+              autoFocus
+              value={pinInput}
+              onChange={(e) => setPinInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleUnlockPin()}
+              placeholder="输入 4-8 位 PIN 码"
+              className="w-full text-center text-lg tracking-[0.3em] bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-slate-100 font-mono focus:outline-none focus:border-blue-500"
+            />
+            <button
+              onClick={handleUnlockPin}
+              className="w-full bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold py-3 rounded-xl shadow-md transition"
+            >
+              解锁屏幕
+            </button>
+
+            <div className="text-center pt-2">
+              <button
+                onClick={handleForgotPin}
+                className="text-xs text-rose-400 hover:text-rose-300 transition"
+              >
+                忘记 PIN 码 / 重置并关闭会话
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 设置 PIN 弹窗 */}
+      {showSetPinModal && (
+        <div className="absolute inset-0 z-40 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#151d30] border border-slate-700 rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-2xl">
+            <div className="flex justify-between items-center">
+              <h3 className="text-sm font-bold flex items-center space-x-2">
+                <span>🔐</span>
+                <span>设置安全锁屏 PIN 码</span>
+              </h3>
+              <button onClick={() => setShowSetPinModal(false)} className="text-slate-400 hover:text-slate-200">
+                ✕
+              </button>
+            </div>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              设置 PIN 码后，您可以随时主动锁屏；且系统在 5 分钟无操作后会自动锁定以保护资产安全。
+            </p>
+
+            <div className="space-y-3">
+              <input
+                type="password"
+                maxLength={8}
+                placeholder="设置新 PIN (4-8 位数字)"
+                value={newPinInput}
+                onChange={(e) => setNewPinInput(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-center"
+              />
+              <input
+                type="password"
+                maxLength={8}
+                placeholder="确认 PIN 码"
+                value={confirmPinInput}
+                onChange={(e) => setConfirmPinInput(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-center"
+              />
+            </div>
+
+            <button
+              onClick={handleSavePin}
+              className="w-full bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold py-2.5 rounded-xl shadow-md transition"
+            >
+              保存并立即启用锁屏
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 顶部导航 */}
       <header className="bg-[#111827] border-b border-slate-800/80 px-6 py-2.5 flex items-center justify-between shadow-lg">
         <div className="flex items-center space-x-3">
@@ -225,6 +410,16 @@ export function App() {
         </div>
 
         <div className="flex items-center space-x-3">
+          {/* 锁屏控制按钮 */}
+          <button
+            onClick={handleLockScreenBtn}
+            className="flex items-center space-x-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-xl transition"
+            title={hasPinSet ? '点击立即锁屏' : '设置锁屏 PIN 码'}
+          >
+            <span>🔒</span>
+            <span className="text-[11px] font-medium">{hasPinSet ? '锁屏' : '设PIN'}</span>
+          </button>
+
           <div className="flex items-center space-x-2 bg-slate-900/90 px-3 py-1.5 rounded-xl border border-slate-800">
             <div className={`w-2.5 h-2.5 rounded-full ${isGwRunning ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />
             <div className="flex flex-col">
@@ -339,7 +534,7 @@ export function App() {
                 {/* 导入 */}
                 <div className="bg-[#151d30]/70 border border-white/5 rounded-2xl p-5 space-y-3 shadow-xl">
                   <h4 className="font-bold text-xs">{t.vault_import_title}</h4>
-                  
+
                   <div>
                     <input
                       type="file"
@@ -524,7 +719,7 @@ export function App() {
                 ))}
               </div>
 
-              {/* 子面板 1: 全局与设备管理 (合并手续费上限) */}
+              {/* 子面板 1: 全局与设备管理 */}
               {rulesSubTab === 'devices' && (
                 <div className="space-y-4">
                   <div className="bg-[#151d30]/70 border border-blue-500/30 p-3.5 rounded-xl flex items-center justify-between shadow-lg">

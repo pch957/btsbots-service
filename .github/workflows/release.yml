@@ -42,12 +42,8 @@ jobs:
       - name: Install Frontend Dependencies
         run: npm install
 
-      - name: Ensure Icons exist
-        run: |
-          mkdir -p src-tauri/icons
-          if [ ! -f "src-tauri/icons/icon.png" ]; then
-            npx @tauri-apps/cli icon public/vite.svg || true
-          fi
+      - name: Ensure Tauri Icons Generated
+        run: node scripts/generate-icons.js
         shell: bash
 
       - name: Build Desktop Artifacts (Tauri Action)

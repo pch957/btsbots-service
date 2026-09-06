@@ -8,7 +8,7 @@ git push origin :refs/tags/v0.0.1
 
 #### 3. 重新打 Tag 并推送：
 # 确保你已经把上面的 .github/workflows/build.yml 提交到了本地仓库
-git add .github *
+git add .github src*
 git commit -m "feat: add GitHub Actions workflow for multi-platform build"
 git push origin main
 
