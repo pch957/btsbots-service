@@ -42,10 +42,6 @@ jobs:
       - name: Install Frontend Dependencies
         run: npm install
 
-      - name: Ensure Tauri Icons Generated
-        run: node scripts/generate-icons.js
-        shell: bash
-
       - name: Build Desktop Artifacts (Tauri Action)
         uses: tauri-apps/tauri-action@v0
         env:
