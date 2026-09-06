@@ -8,6 +8,16 @@ import { SecurityRules } from './types/rules';
 const SCREEN_PIN_KEY = 'btsbots_screen_pin';
 const AUTO_LOCK_TIMEOUT_MS = 5 * 60 * 1000; // 5 分钟无操作自动锁屏
 
+function downloadFile(filename: string, text: string) {
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export function App() {
   const [lang, setLang] = useState<'zh' | 'en' | 'ru'>('zh');
   const [activeTab, setActiveTab] = useState<'auth' | 'gateway' | 'otp' | 'rules' | 'logs'>('auth');
@@ -16,10 +26,11 @@ export function App() {
   const [hasKeystore, setHasKeystore] = useState(false);
   const [savedAccount, setSavedAccount] = useState<string | null>(null);
   const [currentAccount, setCurrentAccount] = useState<string | null>(null);
+  const [activeKeys, setActiveKeys] = useState<string[]>([]);
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [isGwRunning, setIsGwRunning] = useState(false);
 
-  // 锁屏与 PIN 码状态
+  // 锁屏与 PIN 状态
   const [isScreenLocked, setIsScreenLocked] = useState(false);
   const [hasPinSet, setHasPinSet] = useState(false);
   const [pinInput, setPinInput] = useState('');
@@ -33,6 +44,7 @@ export function App() {
   const [importFileName, setImportFileName] = useState('');
   const [importPassword, setImportPassword] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const rulesFileInputRef = useRef<HTMLInputElement>(null);
 
   const [regInvite, setRegInvite] = useState('');
   const [regUsername, setRegUsername] = useState('');
@@ -52,8 +64,11 @@ export function App() {
 
   useEffect(() => {
     (window as any).__onBtsLog = (msg: string) => {
-      setLogs((prev) => [...prev.slice(-200), msg]);
+      setLogs((prev) => [...prev.slice(-499), msg]);
     };
+
+    // 恢复历史日志
+    setLogs([...signBotsEngine.auditLogs]);
 
     const ksExists = KeystoreManager.exists();
     const saved = KeystoreManager.getSavedAccountName();
@@ -65,7 +80,7 @@ export function App() {
 
     signBotsEngine.loadRules().then((r) => setRules(r));
 
-    // 5 分钟闲置检测
+    // 5 分钟无操作自动锁屏检测
     const updateActivity = () => {
       lastActivityRef.current = Date.now();
     };
@@ -94,7 +109,7 @@ export function App() {
     }
   }, [otpTimer]);
 
-  // PIN 码与锁屏逻辑
+  // 锁屏与 PIN 码控制
   const handleLockScreenBtn = () => {
     if (!localStorage.getItem(SCREEN_PIN_KEY)) {
       setShowSetPinModal(true);
@@ -106,7 +121,7 @@ export function App() {
 
   const handleSavePin = () => {
     if (!newPinInput || newPinInput.length < 4) {
-      return alert('PIN 码不能少于 4 位数字！');
+      return alert('PIN 码长度不能少于 4 位数字！');
     }
     if (newPinInput !== confirmPinInput) {
       return alert('两次输入的 PIN 码不一致！');
@@ -132,7 +147,6 @@ export function App() {
     }
   };
 
-  // 忘记 PIN 码逻辑
   const handleForgotPin = () => {
     if (!confirm('忘记 PIN 码将清除本地 PIN，立即断开与服务器的会话并擦除已解密密钥。确定重置吗？')) {
       return;
@@ -142,7 +156,6 @@ export function App() {
     setIsScreenLocked(false);
     setPinInput('');
 
-    // 安全熔断退出
     if (isGwRunning) {
       signBotsEngine.stopGateway();
       setIsGwRunning(false);
@@ -151,6 +164,7 @@ export function App() {
     signBotsEngine.ddp.close();
     setIsUnlocked(false);
     setCurrentAccount(null);
+    setActiveKeys([]);
     setActiveTab('auth');
     alert('已重置 PIN 码并断开会话，请使用主密码重新解锁。');
   };
@@ -160,6 +174,7 @@ export function App() {
     try {
       const creds = await KeystoreManager.loadCredentials(unlockPassword);
       setCurrentAccount(creds.account);
+      setActiveKeys(creds.keys);
       setIsUnlocked(true);
       await signBotsEngine.loginWithKeys(creds.account, creds.keys);
       setUnlockPassword('');
@@ -169,6 +184,15 @@ export function App() {
     } catch (e: any) {
       alert(`解锁失败: ${e.message}`);
     }
+  };
+
+  const handleExportCurrentCredentials = () => {
+    if (!currentAccount || activeKeys.length === 0) {
+      return alert('请先解锁账号！');
+    }
+    const content = `${currentAccount}\n` + activeKeys.map((k, i) => `Key ${i + 1}: ${k}`).join('\n') + '\n';
+    downloadFile(`${currentAccount}_credentials_backup.txt`, content);
+    alert(`✓ [${currentAccount}] 凭据已导出备份`);
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -203,6 +227,7 @@ export function App() {
       setHasKeystore(true);
       setSavedAccount(account);
       setCurrentAccount(account);
+      setActiveKeys(keys);
       setIsUnlocked(true);
       await signBotsEngine.loginWithKeys(account, keys);
 
@@ -228,15 +253,19 @@ export function App() {
       setHasKeystore(true);
       setSavedAccount(res.username);
       setCurrentAccount(res.username);
+      setActiveKeys(res.keys);
       setIsUnlocked(true);
       await signBotsEngine.loginWithKeys(res.username, res.keys);
+
+      // 🌟 核心增强：自动下载明文凭据备份
+      downloadFile(`${res.username}_credentials.txt`, res.credentialsContent);
 
       setRegPassword('');
       setRegInvite('');
       setRegUsername('');
       lastActivityRef.current = Date.now();
 
-      alert(`✨ 账号 [${res.username}] 注册申请已提交！私钥已加密至金库。`);
+      alert(`✨ 账号 [${res.username}] 注册申请已提交！\n私钥已加密存库，并已为您自动下载备份文件: ${res.username}_credentials.txt`);
       setActiveTab('gateway');
     } catch (e: any) {
       alert(`注册失败: ${e.message}`);
@@ -290,13 +319,28 @@ export function App() {
 
   const exportRulesJson = () => {
     if (!rules) return;
-    const blob = new Blob([JSON.stringify(rules, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'security_rules.json';
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadFile('security_rules.json', JSON.stringify(rules, null, 2));
+  };
+
+  const handleImportRulesJson = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const parsed = JSON.parse(evt.target?.result as string);
+        if (!parsed.public_keys || !parsed.trading_risk) {
+          throw new Error('JSON 数据结构缺少必要的风控字段！');
+        }
+        setRules(parsed);
+        signBotsEngine.saveRules(parsed);
+        alert('✓ 风控策略文件导入并热重载成功！');
+      } catch (err: any) {
+        alert(`导入 JSON 失败: ${err.message}`);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
   };
 
   const getKnownAliases = () => {
@@ -304,8 +348,8 @@ export function App() {
   };
 
   return (
-    <div className="flex flex-col h-screen select-none bg-[#0b0f19] text-slate-100 relative">
-      {/* 全屏锁屏遮罩 */}
+    <div className="flex flex-col h-screen bg-[#0b0f19] text-slate-100 relative">
+      {/* 1. 全屏锁屏遮罩 */}
       {isScreenLocked && (
         <div className="absolute inset-0 z-50 bg-[#0b0f19]/95 backdrop-blur-xl flex flex-col items-center justify-center p-6 space-y-6">
           <div className="w-16 h-16 rounded-2xl bg-blue-600/10 border border-blue-500/20 text-blue-400 flex items-center justify-center text-3xl shadow-xl shadow-blue-500/10">
@@ -313,7 +357,7 @@ export function App() {
           </div>
           <div className="text-center space-y-1">
             <h2 className="text-xl font-bold">屏幕已锁定</h2>
-            <p className="text-xs text-slate-400">已保护当前会话，请输入安全 PIN 码解锁</p>
+            <p className="text-xs text-slate-400">当前会话已挂起保护，请输入安全 PIN 码解锁</p>
           </div>
 
           <div className="w-full max-w-xs space-y-4">
@@ -339,16 +383,16 @@ export function App() {
                 onClick={handleForgotPin}
                 className="text-xs text-rose-400 hover:text-rose-300 transition"
               >
-                忘记 PIN 码 / 重置并关闭会话
+                忘记 PIN 码 / 重置并退出会话
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* 设置 PIN 弹窗 */}
+      {/* 2. 设置 PIN 弹窗 */}
       {showSetPinModal && (
-        <div className="absolute inset-0 z-40 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="absolute inset-0 z-40 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-[#151d30] border border-slate-700 rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-2xl">
             <div className="flex justify-between items-center">
               <h3 className="text-sm font-bold flex items-center space-x-2">
@@ -360,7 +404,7 @@ export function App() {
               </button>
             </div>
             <p className="text-xs text-slate-400 leading-relaxed">
-              设置 PIN 码后，您可以随时主动锁屏；且系统在 5 分钟无操作后会自动锁定以保护资产安全。
+              设置 PIN 码后可随时主动锁屏，系统在 5 分钟闲置无操作后将自动锁定以防他人窥屏。
             </p>
 
             <div className="space-y-3">
@@ -386,14 +430,14 @@ export function App() {
               onClick={handleSavePin}
               className="w-full bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold py-2.5 rounded-xl shadow-md transition"
             >
-              保存并立即启用锁屏
+              保存并立即锁定
             </button>
           </div>
         </div>
       )}
 
       {/* 顶部导航 */}
-      <header className="bg-[#111827] border-b border-slate-800/80 px-6 py-2.5 flex items-center justify-between shadow-lg">
+      <header className="bg-[#111827] border-b border-slate-800 px-6 py-2.5 flex items-center justify-between shadow-lg">
         <div className="flex items-center space-x-3">
           <div className="bg-gradient-to-tr from-blue-600 to-indigo-600 text-white p-2 rounded-xl shadow-md">
             🛡️
@@ -410,17 +454,17 @@ export function App() {
         </div>
 
         <div className="flex items-center space-x-3">
-          {/* 锁屏控制按钮 */}
+          {/* 顶部锁屏按钮 */}
           <button
             onClick={handleLockScreenBtn}
-            className="flex items-center space-x-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-xl transition"
+            className="flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-1.5 rounded-xl shadow-md transition"
             title={hasPinSet ? '点击立即锁屏' : '设置锁屏 PIN 码'}
           >
             <span>🔒</span>
-            <span className="text-[11px] font-medium">{hasPinSet ? '锁屏' : '设PIN'}</span>
+            <span>{hasPinSet ? '锁屏' : '设PIN锁屏'}</span>
           </button>
 
-          <div className="flex items-center space-x-2 bg-slate-900/90 px-3 py-1.5 rounded-xl border border-slate-800">
+          <div className="flex items-center space-x-2 bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800">
             <div className={`w-2.5 h-2.5 rounded-full ${isGwRunning ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />
             <div className="flex flex-col">
               <span className="text-[10px] text-slate-400 leading-tight">{t.engine_indicator}</span>
@@ -430,21 +474,23 @@ export function App() {
             </div>
           </div>
 
-          <div className="flex items-center space-x-2 bg-slate-900/90 px-3 py-1.5 rounded-xl border border-slate-800">
+          <div className="flex items-center space-x-2 bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800">
             <div className={`w-2 h-2 rounded-full ${isUnlocked ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`} />
             <span className={`text-xs font-semibold ${isUnlocked ? 'text-emerald-400' : 'text-slate-300'}`}>
               {currentAccount || savedAccount || t.wallet_locked}
             </span>
           </div>
 
+          {/* 修复 Linux 下白色背景的深色下拉框 */}
           <select
             value={lang}
             onChange={(e) => setLang(e.target.value as any)}
-            className="bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-2.5 py-1.5 focus:outline-none"
+            className="bg-[#1e293b] border border-slate-700 text-slate-100 text-xs rounded-xl px-2.5 py-1.5 focus:outline-none"
+            style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}
           >
-            <option value="zh">🇨🇳 简体中文</option>
-            <option value="en">🇺🇸 English</option>
-            <option value="ru">🇷🇺 Русский</option>
+            <option value="zh" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>🇨🇳 简体中文</option>
+            <option value="en" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>🇺🇸 English</option>
+            <option value="ru" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>🇷🇺 Русский</option>
           </select>
         </div>
       </header>
@@ -452,7 +498,7 @@ export function App() {
       {/* 工作区 */}
       <div className="flex flex-1 overflow-hidden">
         {/* 侧边栏 */}
-        <aside className="w-52 bg-[#111827] border-r border-slate-800/80 p-3 flex flex-col justify-between">
+        <aside className="w-52 bg-[#111827] border-r border-slate-800 p-3 flex flex-col justify-between">
           <nav className="space-y-1">
             {[
               { id: 'auth', label: t.nav_vault, icon: '🔑' },
@@ -474,14 +520,29 @@ export function App() {
             ))}
           </nav>
 
-          <div className="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/60 text-[11px] text-slate-500">
-            <div className="flex justify-between">
-              <span>{t.core_engine}</span>
-              <span className={isGwRunning ? 'text-emerald-400' : 'text-rose-400'}>
-                {isGwRunning ? 'Online' : 'Stopped'}
+          <div className="space-y-2">
+            <button
+              onClick={handleLockScreenBtn}
+              className="w-full flex items-center justify-between bg-slate-800/80 hover:bg-slate-700 border border-slate-700 px-3 py-2 rounded-xl text-xs text-slate-300 transition"
+            >
+              <div className="flex items-center space-x-2">
+                <span>🔒</span>
+                <span>锁屏挂起</span>
+              </div>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${hasPinSet ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                {hasPinSet ? 'PIN就绪' : '未设PIN'}
               </span>
+            </button>
+
+            <div className="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 text-[11px] text-slate-500">
+              <div className="flex justify-between">
+                <span>{t.core_engine}</span>
+                <span className={isGwRunning ? 'text-emerald-400' : 'text-rose-400'}>
+                  {isGwRunning ? 'Online' : 'Stopped'}
+                </span>
+              </div>
+              <div>BTSBots TS Engine</div>
             </div>
-            <div>BTSBots TS Engine</div>
           </div>
         </aside>
 
@@ -496,7 +557,7 @@ export function App() {
               </div>
 
               {hasKeystore && (
-                <div className="bg-[#151d30]/70 backdrop-blur border border-blue-500/20 rounded-2xl p-6 max-w-lg space-y-4 shadow-xl">
+                <div className="bg-[#151d30] border border-blue-500/20 rounded-2xl p-6 max-w-lg space-y-4 shadow-xl">
                   <div className="flex justify-between items-center">
                     <div className="flex items-center space-x-3">
                       <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center border border-amber-500/20">
@@ -507,32 +568,45 @@ export function App() {
                         <p className="text-xs text-slate-400 font-mono">已绑定账号: [{savedAccount}]</p>
                       </div>
                     </div>
+                    {isUnlocked && (
+                      <button
+                        onClick={handleExportCurrentCredentials}
+                        className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-2.5 py-1.5 rounded-lg border border-slate-700 flex items-center space-x-1"
+                      >
+                        <span>📥</span>
+                        <span>导出备份</span>
+                      </button>
+                    )}
                   </div>
 
-                  <div>
-                    <label className="block text-xs text-slate-400 mb-1.5">{t.label_pass}</label>
-                    <input
-                      type="password"
-                      value={unlockPassword}
-                      onChange={(e) => setUnlockPassword(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleUnlock()}
-                      placeholder="输入主保护口令"
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-blue-500"
-                    />
-                  </div>
+                  {!isUnlocked && (
+                    <>
+                      <div>
+                        <label className="block text-xs text-slate-400 mb-1.5">{t.label_pass}</label>
+                        <input
+                          type="password"
+                          value={unlockPassword}
+                          onChange={(e) => setUnlockPassword(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleUnlock()}
+                          placeholder="输入主保护口令"
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-blue-500"
+                        />
+                      </div>
 
-                  <button
-                    onClick={handleUnlock}
-                    className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-6 py-2.5 rounded-xl shadow-md transition"
-                  >
-                    {t.btn_unlock}
-                  </button>
+                      <button
+                        onClick={handleUnlock}
+                        className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-6 py-2.5 rounded-xl shadow-md transition"
+                      >
+                        {t.btn_unlock}
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
 
               <div className="grid grid-cols-2 gap-4 max-w-3xl pt-2">
                 {/* 导入 */}
-                <div className="bg-[#151d30]/70 border border-white/5 rounded-2xl p-5 space-y-3 shadow-xl">
+                <div className="bg-[#151d30] border border-slate-800 rounded-2xl p-5 space-y-3 shadow-xl">
                   <h4 className="font-bold text-xs">{t.vault_import_title}</h4>
 
                   <div>
@@ -554,7 +628,7 @@ export function App() {
                       <button
                         type="button"
                         onClick={() => fileInputRef.current?.click()}
-                        className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shadow-sm transition"
+                        className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shadow-sm transition cursor-pointer"
                       >
                         {t.btn_browse}
                       </button>
@@ -572,14 +646,14 @@ export function App() {
                   </div>
                   <button
                     onClick={handleImportSave}
-                    className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold py-2 rounded-xl transition border border-slate-700"
+                    className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold py-2 rounded-xl transition border border-slate-700 cursor-pointer"
                   >
                     {t.btn_encrypt_save}
                   </button>
                 </div>
 
                 {/* 注册 */}
-                <div className="bg-[#151d30]/70 border border-white/5 rounded-2xl p-5 space-y-3 shadow-xl">
+                <div className="bg-[#151d30] border border-slate-800 rounded-2xl p-5 space-y-3 shadow-xl">
                   <h4 className="font-bold text-xs">{t.vault_reg_title}</h4>
                   <input
                     type="text"
@@ -604,7 +678,7 @@ export function App() {
                   />
                   <button
                     onClick={handleRegister}
-                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold py-2 rounded-xl transition shadow-md shadow-emerald-600/20"
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold py-2 rounded-xl transition shadow-md shadow-emerald-600/20 cursor-pointer"
                   >
                     {t.btn_register_submit}
                   </button>
@@ -621,7 +695,7 @@ export function App() {
                 <p className="text-xs text-slate-400 mt-0.5">{t.gw_desc}</p>
               </div>
 
-              <div className="bg-[#151d30]/70 border border-white/5 rounded-2xl p-5 flex items-center justify-between shadow-xl">
+              <div className="bg-[#151d30] border border-slate-800 rounded-2xl p-5 flex items-center justify-between shadow-xl">
                 <div className="flex items-center space-x-4">
                   <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-xl font-bold ${
                     isGwRunning ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400' : 'bg-rose-500/10 border border-rose-500/20 text-rose-400'
@@ -638,7 +712,7 @@ export function App() {
 
                 <button
                   onClick={toggleGateway}
-                  className={`text-xs font-semibold px-5 py-2.5 rounded-xl shadow-lg transition ${
+                  className={`text-xs font-semibold px-5 py-2.5 rounded-xl shadow-lg transition cursor-pointer ${
                     isGwRunning ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/20' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/20'
                   }`}
                 >
@@ -656,17 +730,17 @@ export function App() {
                 <p className="text-xs text-slate-400 mt-0.5">{t.otp_desc}</p>
               </div>
 
-              <div className="bg-[#151d30]/70 border border-white/5 rounded-2xl p-6 max-w-sm mx-auto flex flex-col items-center space-y-4 shadow-xl">
+              <div className="bg-[#151d30] border border-slate-800 rounded-2xl p-6 max-w-sm mx-auto flex flex-col items-center space-y-4 shadow-xl">
                 <div className="text-xs text-slate-400 font-medium flex items-center space-x-1.5">
                   <span>{t.otp_label}</span>
                   {otpTimer !== null && <span className="text-[10px] text-blue-400 font-mono">({otpTimer}s)</span>}
                 </div>
 
-                <div className="w-full flex items-center justify-between bg-slate-900 border border-slate-700/80 rounded-xl px-5 py-3">
+                <div className="w-full flex items-center justify-between bg-slate-900 border border-slate-700 rounded-xl px-5 py-3">
                   <div className="font-mono text-2xl font-bold tracking-[0.2em] text-amber-400">{otpCode}</div>
                   <button
                     onClick={handleCopyOtp}
-                    className="text-xs px-2.5 py-1.5 bg-slate-800 rounded-lg border border-slate-700 hover:bg-slate-700 text-slate-200 transition"
+                    className="text-xs px-2.5 py-1.5 bg-slate-800 rounded-lg border border-slate-700 hover:bg-slate-700 text-slate-200 transition cursor-pointer"
                   >
                     复制
                   </button>
@@ -674,7 +748,7 @@ export function App() {
 
                 <button
                   onClick={fetchOtp}
-                  className="w-full bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold py-2.5 rounded-xl shadow-md transition"
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold py-2.5 rounded-xl shadow-md transition cursor-pointer"
                 >
                   {t.otp_refresh_btn}
                 </button>
@@ -691,15 +765,28 @@ export function App() {
                   <p className="text-xs text-slate-400 mt-0.5">{t.rules_desc}</p>
                 </div>
                 <div className="flex space-x-2">
+                  <input
+                    type="file"
+                    ref={rulesFileInputRef}
+                    accept=".json"
+                    onChange={handleImportRulesJson}
+                    className="hidden"
+                  />
+                  <button
+                    onClick={() => rulesFileInputRef.current?.click()}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-3 py-1.5 rounded-xl border border-slate-700 transition cursor-pointer"
+                  >
+                    📂 导入 JSON
+                  </button>
                   <button
                     onClick={exportRulesJson}
-                    className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-3 py-1.5 rounded-xl border border-slate-700 transition"
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-3 py-1.5 rounded-xl border border-slate-700 transition cursor-pointer"
                   >
-                    导出 JSON
+                    💾 导出 JSON
                   </button>
                   <button
                     onClick={saveRulesToLocal}
-                    className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-4 py-1.5 rounded-xl shadow-md transition"
+                    className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-4 py-1.5 rounded-xl shadow-md transition cursor-pointer"
                   >
                     {t.btn_save_rules}
                   </button>
@@ -712,7 +799,7 @@ export function App() {
                   <button
                     key={st}
                     onClick={() => setRulesSubTab(st)}
-                    className={`pb-2 transition ${rulesSubTab === st ? 'border-b-2 border-blue-500 text-blue-400 font-bold' : 'hover:text-slate-200'}`}
+                    className={`pb-2 transition cursor-pointer ${rulesSubTab === st ? 'border-b-2 border-blue-500 text-blue-400 font-bold' : 'hover:text-slate-200'}`}
                   >
                     {t[`rules_tab_${st}` as keyof typeof t]}
                   </button>
@@ -722,7 +809,7 @@ export function App() {
               {/* 子面板 1: 全局与设备管理 */}
               {rulesSubTab === 'devices' && (
                 <div className="space-y-4">
-                  <div className="bg-[#151d30]/70 border border-blue-500/30 p-3.5 rounded-xl flex items-center justify-between shadow-lg">
+                  <div className="bg-[#151d30] border border-blue-500/30 p-3.5 rounded-xl flex items-center justify-between shadow-lg">
                     <div>
                       <div className="text-xs font-bold text-slate-200">{t.global_fee_title}</div>
                       <div className="text-[11px] text-slate-400">{t.global_fee_desc}</div>
@@ -738,7 +825,7 @@ export function App() {
                     </div>
                   </div>
 
-                  <div className="bg-[#151d30]/70 border border-white/5 p-4 rounded-xl space-y-3 shadow-xl">
+                  <div className="bg-[#151d30] border border-slate-800 p-4 rounded-xl space-y-3 shadow-xl">
                     <div className="flex justify-between items-center">
                       <span className="font-semibold text-xs text-slate-200">{t.devices_table_title}</span>
                       <button
@@ -752,7 +839,7 @@ export function App() {
                             public_keys: { ...rules.public_keys, [fp.trim()]: alias.trim() },
                           });
                         }}
-                        className="bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 px-3 py-1 rounded-lg text-xs"
+                        className="bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 px-3 py-1 rounded-lg text-xs cursor-pointer"
                       >
                         + {t.btn_add_device}
                       </button>
@@ -794,7 +881,7 @@ export function App() {
                                     oauth_allowed_devices: rules.oauth_allowed_devices.filter((a) => a !== alias),
                                   });
                                 }}
-                                className="text-rose-400 hover:text-rose-300 font-semibold"
+                                className="text-rose-400 hover:text-rose-300 font-semibold cursor-pointer"
                               >
                                 ✕ 删除
                               </button>
@@ -810,7 +897,7 @@ export function App() {
               {/* 子面板 2: 自由大额转账 */}
               {rulesSubTab === 'unlimited' && (
                 <div className="space-y-4 text-xs">
-                  <div className="bg-[#151d30]/70 border border-white/5 p-4 rounded-xl space-y-3 shadow-xl">
+                  <div className="bg-[#151d30] border border-slate-800 p-4 rounded-xl space-y-3 shadow-xl">
                     <div className="flex justify-between items-center">
                       <span className="font-semibold text-slate-200">{t.unlimited_devices_title}</span>
                       <div className="flex items-center space-x-2">
@@ -836,7 +923,7 @@ export function App() {
                               });
                             }
                           }}
-                          className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded-lg"
+                          className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded-lg cursor-pointer"
                         >
                           {t.btn_add}
                         </button>
@@ -856,7 +943,7 @@ export function App() {
                                 },
                               });
                             }}
-                            className="text-rose-400 font-bold"
+                            className="text-rose-400 font-bold cursor-pointer"
                           >
                             ✕
                           </button>
@@ -865,7 +952,7 @@ export function App() {
                     </div>
                   </div>
 
-                  <div className="bg-[#151d30]/70 border border-white/5 p-4 rounded-xl space-y-3 shadow-xl">
+                  <div className="bg-[#151d30] border border-slate-800 p-4 rounded-xl space-y-3 shadow-xl">
                     <div className="flex justify-between items-center">
                       <div>
                         <span className="font-semibold text-slate-200">{t.unlimited_recipients_title}</span>
@@ -883,13 +970,13 @@ export function App() {
                             unlimited_payments: {
                               ...rules.unlimited_payments,
                               recipient_whitelist: {
-                                ...rules.unlimited_payments.recipient_whitelist,
+                                ...rules.unlimited_payments,
                                 [acc]: memo ? { id, required_memo: memo } : { id, required_memo: '' },
                               },
                             },
                           });
                         }}
-                        className="bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 px-3 py-1 rounded-lg text-xs"
+                        className="bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 px-3 py-1 rounded-lg text-xs cursor-pointer"
                       >
                         + {t.btn_add_recipient}
                       </button>
@@ -953,7 +1040,7 @@ export function App() {
                                   unlimited_payments: { ...rules.unlimited_payments, recipient_whitelist: copy },
                                 });
                               }}
-                              className="text-rose-400 hover:text-rose-300 font-semibold px-2"
+                              className="text-rose-400 hover:text-rose-300 font-semibold px-2 cursor-pointer"
                             >
                               ✕ 删除
                             </button>
@@ -968,7 +1055,7 @@ export function App() {
               {/* 子面板 3: 小额微支付 */}
               {rulesSubTab === 'micro' && (
                 <div className="space-y-4 text-xs">
-                  <div className="bg-[#151d30]/70 border border-white/5 p-4 rounded-xl space-y-3 shadow-xl">
+                  <div className="bg-[#151d30] border border-slate-800 p-4 rounded-xl space-y-3 shadow-xl">
                     <div className="flex justify-between items-center">
                       <span className="font-semibold text-slate-200">{t.micro_base_title}</span>
                       <button
@@ -984,7 +1071,7 @@ export function App() {
                             },
                           });
                         }}
-                        className="bg-blue-600/20 text-blue-400 border border-blue-500/30 px-3 py-1 rounded-lg text-xs"
+                        className="bg-blue-600/20 text-blue-400 border border-blue-500/30 px-3 py-1 rounded-lg text-xs cursor-pointer"
                       >
                         + {t.btn_add_coin}
                       </button>
@@ -1017,7 +1104,7 @@ export function App() {
                                 micro_payments: { ...rules.micro_payments, base_limits: copy },
                               });
                             }}
-                            className="text-rose-400 font-bold px-1"
+                            className="text-rose-400 font-bold px-1 cursor-pointer"
                           >
                             ✕
                           </button>
@@ -1026,7 +1113,7 @@ export function App() {
                     </div>
                   </div>
 
-                  <div className="bg-[#151d30]/70 border border-white/5 p-4 rounded-xl space-y-3 shadow-xl">
+                  <div className="bg-[#151d30] border border-slate-800 p-4 rounded-xl space-y-3 shadow-xl">
                     <span className="font-semibold text-slate-200">{t.micro_dev_rules_title}</span>
                     <table className="w-full text-xs">
                       <thead>
@@ -1133,7 +1220,7 @@ export function App() {
               {/* 子面板 4: 交易与挂单风控 */}
               {rulesSubTab === 'trading' && (
                 <div className="space-y-4 text-xs">
-                  <div className="bg-[#151d30]/70 border border-white/5 p-4 rounded-xl space-y-3 shadow-xl">
+                  <div className="bg-[#151d30] border border-slate-800 p-4 rounded-xl space-y-3 shadow-xl">
                     <span className="font-semibold text-slate-200">{t.volatility_title}</span>
                     <div className="grid grid-cols-3 gap-4">
                       <div>
@@ -1184,7 +1271,7 @@ export function App() {
                     </div>
                   </div>
 
-                  <div className="bg-[#151d30]/70 border border-white/5 p-4 rounded-xl space-y-3 shadow-xl">
+                  <div className="bg-[#151d30] border border-slate-800 p-4 rounded-xl space-y-3 shadow-xl">
                     <div className="flex justify-between items-center">
                       <span className="font-semibold text-slate-200">{t.market_whitelist_title}</span>
                       <div className="flex items-center space-x-2">
@@ -1209,7 +1296,7 @@ export function App() {
                               setNewMarket('');
                             }
                           }}
-                          className="bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded-lg"
+                          className="bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded-lg cursor-pointer"
                         >
                           {t.btn_add}
                         </button>
@@ -1229,7 +1316,7 @@ export function App() {
                                 },
                               });
                             }}
-                            className="text-rose-400 font-bold"
+                            className="text-rose-400 font-bold cursor-pointer"
                           >
                             ✕
                           </button>
@@ -1242,21 +1329,46 @@ export function App() {
             </div>
           )}
 
-          {/* 5. 实时日志 */}
+          {/* 5. 实时日志 (完全开放划词复制 & 支持一键复制整行 & 持久化历史) */}
           {activeTab === 'logs' && (
             <div className="space-y-3 flex flex-col h-full">
               <div className="flex justify-between items-center">
-                <h2 className="text-xl font-bold">{t.logs_title}</h2>
-                <button
-                  onClick={() => setLogs([])}
-                  className="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded-lg border border-slate-700"
-                >
-                  {t.btn_clear_logs}
-                </button>
+                <div>
+                  <h2 className="text-xl font-bold">{t.logs_title}</h2>
+                  <p className="text-xs text-slate-400 mt-0.5">支持鼠标划词复制，或直接点击单条日志进行一键复制</p>
+                </div>
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => {
+                      if (logs.length === 0) return alert('当前没有日志可导出');
+                      downloadFile('btsbots_logs.txt', logs.join('\n'));
+                    }}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-2.5 py-1 rounded-lg border border-slate-700 cursor-pointer"
+                  >
+                    📥 导出日志
+                  </button>
+                  <button
+                    onClick={() => {
+                      signBotsEngine.clearLogs();
+                      setLogs([]);
+                    }}
+                    className="bg-slate-800 hover:bg-slate-700 text-xs px-2.5 py-1 rounded-lg border border-slate-700 cursor-pointer"
+                  >
+                    {t.btn_clear_logs}
+                  </button>
+                </div>
               </div>
-              <div className="flex-1 bg-[#070b13] border border-slate-800/80 rounded-xl p-3.5 font-mono text-xs text-emerald-400 overflow-y-auto">
+              <div className="flex-1 bg-[#070b13] border border-slate-800 rounded-xl p-3.5 font-mono text-xs text-emerald-400 overflow-y-auto select-text cursor-text">
                 {logs.map((log, index) => (
-                  <div key={index} className="py-0.5 leading-relaxed">
+                  <div
+                    key={index}
+                    onClick={() => {
+                      copyToClipboard(log);
+                      alert(`已复制该行日志:\n${log}`);
+                    }}
+                    className="py-0.5 leading-relaxed hover:bg-slate-800/40 rounded px-1 transition cursor-pointer select-text"
+                    title="点击复制整行"
+                  >
                     {log}
                   </div>
                 ))}

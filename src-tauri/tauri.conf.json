@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
-  "productName": "BTSBots",
+  "productName": "btsbots-service",
   "version": "1.0.0",
   "identifier": "com.btsbots.service",
   "build": {
@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "BTSBots 控制中心 (Zero-Trust TS Edition)",
+        "title": "BTSBots Service (Zero-Trust Edition)",
         "width": 1100,
         "height": 760,
         "minWidth": 960,

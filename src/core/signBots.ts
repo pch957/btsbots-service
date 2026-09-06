@@ -4,6 +4,8 @@ import { SecurityRules } from '../types/rules';
 import { validateBtsUsername } from './utils';
 import { PrivateKey, hash } from 'bitsharesjs';
 
+const AUDIT_LOGS_STORAGE_KEY = 'btsbots_audit_logs';
+
 export class SignBotsEngine {
   public ddp: MeteorDDPClient;
   public keyManager: KeyManager;
@@ -13,20 +15,43 @@ export class SignBotsEngine {
   public isRunning = false;
   public rules: SecurityRules | null = null;
   private seenSignatures: Set<string> = new Set();
-  private auditLogs: Array<{ time: string; text: string }> = [];
+  public auditLogs: string[] = [];
 
   constructor() {
     this.ddp = new MeteorDDPClient();
     this.keyManager = new KeyManager();
+    this.loadPersistedLogs();
+  }
+
+  private loadPersistedLogs(): void {
+    try {
+      const stored = localStorage.getItem(AUDIT_LOGS_STORAGE_KEY);
+      if (stored) {
+        this.auditLogs = JSON.parse(stored);
+      }
+    } catch (e) {
+      this.auditLogs = [];
+    }
   }
 
   public log(text: string): void {
     const time = new Date().toLocaleTimeString();
-    this.auditLogs.push({ time, text });
-    if (this.auditLogs.length > 300) this.auditLogs.shift();
+    const entry = `[${time}] ${text}`;
+    this.auditLogs.push(entry);
+    if (this.auditLogs.length > 500) this.auditLogs.shift();
+
+    try {
+      localStorage.setItem(AUDIT_LOGS_STORAGE_KEY, JSON.stringify(this.auditLogs));
+    } catch {}
+
     if ((window as any).__onBtsLog) {
-      (window as any).__onBtsLog(`[${time}] ${text}`);
+      (window as any).__onBtsLog(entry);
     }
+  }
+
+  public clearLogs(): void {
+    this.auditLogs = [];
+    localStorage.removeItem(AUDIT_LOGS_STORAGE_KEY);
   }
 
   public async loadRules(): Promise<SecurityRules> {
@@ -239,7 +264,6 @@ export class SignBotsEngine {
       return;
     }
 
-    // 指纹计算
     let fp50 = '';
     try {
       const h = hash.sha256(pubHex.toLowerCase());
@@ -251,7 +275,7 @@ export class SignBotsEngine {
 
     const alias = this.rules?.public_keys[fp50];
     if (!alias) {
-      this.log(`❌ 拒绝签名: 未授权的设备指纹 ${fp50}`);
+      this.log(`❌ 拒绝签名: 未授权的设备指纹: ${fp50}`);
       await this.ddp.call('replySignRequest', false, docId, `未授权的设备指纹: ${fp50}`);
       return;
     }
@@ -271,7 +295,7 @@ export class SignBotsEngine {
       if (!pKey) throw new Error('本地未找到签名所需 Active Key');
 
       await this.ddp.call('replySignRequest', true, docId, 'BroadcastSuccess');
-      this.log(`🌟 [交易成功] 签名请求已放行: ${docId}`);
+      this.log(`🌟 [交易成功] 签名请求已安全放行: ${docId}`);
     } catch (e: any) {
       this.log(`🚨 签名或广播失败: ${e.message}`);
       await this.ddp.call('replySignRequest', false, docId, e.message);
