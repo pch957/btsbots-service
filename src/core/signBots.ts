@@ -271,7 +271,7 @@ export class SignBotsEngine {
     this.ddp.subscribe('chainBlockHeadStream');
     this.ddp.subscribe('chainGlobalProperties');
     this.ddp.subscribe('allPendingSignRequests');
-    this.ddp.subscribe('pendingAccountRegistrations', [this.accountName]);
+    this.ddp.subscribe('pendingAccountRegistrations');
 
     this.ddp.on('data_changed', (action, collection, docId, fields) => {
       if (!this.isRunning) return;
