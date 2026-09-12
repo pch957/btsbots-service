@@ -31,8 +31,9 @@ export default defineConfig({
   },
   build: {
     target: 'esnext',
-    minify: false, // 关闭混淆以便排查
-    sourcemap: true,
+    //minify: false, // 关闭混淆以便排查
+    minify: 'esbuild',
+    sourcemap: false,
     commonjsOptions: {
       transformMixedEsModules: true,
       include: [/node_modules/],
