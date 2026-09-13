@@ -1,12 +1,26 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use mimalloc::MiMalloc;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{TrayIconBuilder, TrayIconEvent},
     Manager, WindowEvent,
 };
 
+// 🌟 全局替换为极致轻量的高性能内存分配器 mimalloc（彻底解决 glibc 内存碎片与长连接驻留问题）
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
 fn main() {
+    // 🌟 在 Linux 下优化 WebKitGTK 内存与图形开销
+    #[cfg(target_os = "linux")]
+    {
+        // 限制 WebKit 图形合成器与非必要的线程池内存膨胀
+        if std::env::var("WEBKIT_DISABLE_COMPOSITING_MODE").is_err() {
+            std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+        }
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {

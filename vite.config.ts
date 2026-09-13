@@ -6,6 +6,8 @@ export default defineConfig({
   plugins: [
     react(),
     nodePolyfills({
+      // 🌟 精简 Polyfill，仅注入业务必需的 Buffer 与基础环境变量，减少 JS 堆内存
+      include: ['buffer', 'process', 'util', 'stream', 'events'],
       globals: {
         Buffer: true,
         global: true,
@@ -20,26 +22,31 @@ export default defineConfig({
     strictPort: true,
     host: '127.0.0.1',
     allowedHosts: [
-      'service.btsbots.com',   // 🔴 允许你当前使用的自定义开发域名
-    ]
+      'service.btsbots.com',
+    ],
   },
   resolve: {
     alias: {
-      // 彻底解决某些旧版打包工具在 Vite 中找不到库入口的问题
-      'bitsharesjs': 'bitsharesjs/es/index.js'
-    }
+      bitsharesjs: 'bitsharesjs/es/index.js',
+    },
   },
   build: {
     target: 'esnext',
-    //minify: false, // 关闭混淆以便排查
     minify: 'esbuild',
     sourcemap: false,
+    cssMinify: true,
     commonjsOptions: {
       transformMixedEsModules: true,
       include: [/node_modules/],
     },
     rollupOptions: {
       external: [],
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom'],
+          crypto: ['bitsharesjs', 'bitsharesjs-ws'],
+        },
+      },
     },
   },
 });

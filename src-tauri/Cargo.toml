@@ -13,3 +13,11 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-shell = "2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+mimalloc = { version = "0.1", default-features = false }
+
+[profile.release]
+opt-level = "z"       # 针对二进制大小与内存占用进行最小化优化
+lto = true            # 开启全程序链接时优化
+codegen-units = 1     # 降低并行编译单元以获得最大优化
+panic = "abort"       # 禁用栈回溯，大幅减小运行时开销
+strip = true          # 剥离所有调试符号
